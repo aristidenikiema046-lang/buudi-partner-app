@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "300542948108",
+    "project_id": "buudi-africa-8bcba",
+    "storage_bucket": "buudi-africa-8bcba.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:300542948108:android:7aa8a34dee74dd18e74f29",
+        "android_client_info": {
+          "package_name": "com.example.buudi_proto"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDUbhPTBFXtqCmo8IjxbdGCsnxycGNlkaw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
