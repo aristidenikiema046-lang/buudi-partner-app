@@ -1,30 +1,42 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../services/driver_service.dart';
 import '../../../services/background_service.dart';
-import 'driver_rides_tab.dart';
+import 'delivery_orders_tab.dart';
 
-class DriverHomeTab extends StatefulWidget {
-  const DriverHomeTab({Key? key}) : super(key: key);
+class DeliveryHomeTab extends StatefulWidget {
+  const DeliveryHomeTab({Key? key}) : super(key: key);
 
   @override
-  State<DriverHomeTab> createState() => _DriverHomeTabState();
+  State<DeliveryHomeTab> createState() => _DeliveryHomeTabState();
 }
 
-class _DriverHomeTabState extends State<DriverHomeTab> {
+class _DeliveryHomeTabState extends State<DeliveryHomeTab> {
+  static const int _offerSecondsTotal = 25;
+
   bool _isLoading = true;
   bool _isOnline = false;
   Map<String, dynamic> _dashboardData = {};
   String? _errorMessage;
 
-  List _pendingRides = [];
-  bool _isLoadingRides = false;
+  List _pendingDeliveries = [];
+  bool _isLoadingDeliveries = false;
+
+  Timer? _offerTimer;
+  int _secondsLeft = _offerSecondsTotal;
 
   @override
   void initState() {
     super.initState();
     _loadDashboard();
+  }
+
+  @override
+  void dispose() {
+    _offerTimer?.cancel();
+    super.dispose();
   }
 
   Future<String?> _getToken() async {
@@ -45,18 +57,16 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
       }
 
       final result = await DriverService.getDashboard(token);
-      print("📊 DONNÉES REÇUES DU BACKEND : $result");
 
       if (result['success'] == true) {
         final rawData = result['data'];
         setState(() {
           _dashboardData = rawData is Map<String, dynamic> ? rawData : {};
-          // Lecture sécurisée du statut en ligne
           _isOnline = _dashboardData['is_online'] == true ||
-                      _dashboardData['driver_status'] == 'online';
+              _dashboardData['driver_status'] == 'online';
           _isLoading = false;
         });
-        if (_isOnline) _loadPendingRides();
+        if (_isOnline) _loadPendingDeliveries();
       } else {
         setState(() {
           _errorMessage = result['message'] ?? "Erreur inconnue du serveur";
@@ -73,7 +83,7 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
 
   Future<void> _toggleOnlineStatus(bool value) async {
     setState(() => _isOnline = value);
-    
+
     try {
       final token = await _getToken();
       if (token == null) return;
@@ -82,11 +92,8 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
 
       if (result['success'] == true) {
         final newStatus = result['is_online'] ?? value;
-        setState(() {
-          _isOnline = newStatus;
-        });
+        setState(() => _isOnline = newStatus);
 
-        // 🚀 GESTION DU TRACKING GPS SELON LE STATUT
         final String? driverId = _dashboardData['id']?.toString() ?? _dashboardData['driver_id']?.toString();
 
         if (newStatus == true) {
@@ -94,25 +101,23 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
             final hasLocationPermission = await _ensureLocationPermission();
             if (hasLocationPermission) {
               await BackgroundServiceManager().startTracking(driverId);
-              _loadPendingRides();
+              _loadPendingDeliveries();
             } else if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text("Autorisez la localisation pour être visible des clients."),
+                  content: Text("Autorisez la localisation pour recevoir des commandes."),
                   backgroundColor: Colors.red,
                 ),
               );
             }
-          } else {
-            print("⚠️ Impossible de démarrer le tracking : ID du chauffeur introuvable.");
           }
         } else {
           await BackgroundServiceManager().stopTracking();
-          setState(() => _pendingRides = []);
+          _offerTimer?.cancel();
+          setState(() => _pendingDeliveries = []);
         }
-
       } else if (result['code'] == 'SUBSCRIPTION_REQUIRED' ||
-                 (result['message'] != null && result['message'].toString().toLowerCase().contains('pass'))) {
+          (result['message'] != null && result['message'].toString().toLowerCase().contains('pass'))) {
         setState(() => _isOnline = !value);
         _showSubscriptionDialog(result['message'] ?? "Votre pass journalier a expiré. Veuillez l'acheter pour vous mettre en ligne.");
       } else {
@@ -129,8 +134,6 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
     }
   }
 
-  /// S'assure que la permission de localisation (au moins "en cours d'utilisation")
-  /// est accordée avant de démarrer le tracking en arrière-plan.
   Future<bool> _ensureLocationPermission() async {
     if (!await Geolocator.isLocationServiceEnabled()) return false;
 
@@ -143,20 +146,20 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
         permission == LocationPermission.whileInUse;
   }
 
-  /// Récupère les courses en attente autour de la position actuelle du chauffeur
-  /// (même mécanisme de localisation que le tracking GPS en arrière-plan).
-  Future<void> _loadPendingRides() async {
-    setState(() => _isLoadingRides = true);
+  /// Récupère les livraisons en attente (le backend filtre déjà par
+  /// vehicle_type : un compte Moto/Vélo ne voit que le service "Livraison").
+  Future<void> _loadPendingDeliveries() async {
+    setState(() => _isLoadingDeliveries = true);
 
     try {
       final token = await _getToken();
       if (token == null) {
-        setState(() => _isLoadingRides = false);
+        setState(() => _isLoadingDeliveries = false);
         return;
       }
 
       if (!await _ensureLocationPermission()) {
-        setState(() => _isLoadingRides = false);
+        setState(() => _isLoadingDeliveries = false);
         return;
       }
 
@@ -174,20 +177,61 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
       if (result['success'] == true) {
         final rawData = result['data'];
         setState(() {
-          _pendingRides = rawData is List
+          _pendingDeliveries = rawData is List
               ? rawData
               : (rawData is Map && rawData['rides'] is List ? rawData['rides'] : []);
-          _isLoadingRides = false;
+          _isLoadingDeliveries = false;
         });
+        _startOfferCountdown();
       } else {
-        setState(() => _isLoadingRides = false);
+        setState(() => _isLoadingDeliveries = false);
       }
     } catch (e) {
-      setState(() => _isLoadingRides = false);
+      setState(() => _isLoadingDeliveries = false);
     }
   }
 
-  Future<void> _acceptRide(dynamic rideId) async {
+  /// Compte à rebours purement local pour la carte de réception affichée à
+  /// l'écran. Le backend n'a pas de notion d'expiration d'offre par
+  /// chauffeur : à 0, on passe simplement à la commande suivante côté UI.
+  void _startOfferCountdown() {
+    _offerTimer?.cancel();
+    if (_pendingDeliveries.isEmpty) return;
+
+    setState(() => _secondsLeft = _offerSecondsTotal);
+    _offerTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_secondsLeft <= 1) {
+        _skipCurrentOffer();
+      } else {
+        setState(() => _secondsLeft--);
+      }
+    });
+  }
+
+  /// "Refuser" : aucun endpoint backend ne permet de décliner une commande
+  /// encore "pending" (non assignée) - on passe juste à la suivante côté UI.
+  void _skipCurrentOffer() {
+    _offerTimer?.cancel();
+    if (_pendingDeliveries.isEmpty) return;
+
+    setState(() {
+      _pendingDeliveries = _pendingDeliveries.sublist(1);
+    });
+
+    if (_pendingDeliveries.isNotEmpty) {
+      _startOfferCountdown();
+    } else {
+      _loadPendingDeliveries();
+    }
+  }
+
+  Future<void> _acceptDelivery(dynamic rideId) async {
+    _offerTimer?.cancel();
+
     final token = await _getToken();
     if (token == null || rideId == null) return;
 
@@ -196,15 +240,17 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
 
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message'] ?? 'Course acceptée !'), backgroundColor: Colors.green),
+        SnackBar(content: Text(result['message'] ?? 'Livraison acceptée !'), backgroundColor: Colors.green),
       );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const DriverRidesTab()),
+        MaterialPageRoute(builder: (_) => const DeliveryOrdersTab()),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['message'] ?? "Impossible d'accepter cette course."), backgroundColor: Colors.red),
+        SnackBar(content: Text(result['message'] ?? "Impossible d'accepter cette livraison."), backgroundColor: Colors.red),
       );
+      // La commande a probablement été prise par un autre livreur entre-temps.
+      _loadPendingDeliveries();
     }
   }
 
@@ -228,7 +274,7 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
                 final res = await DriverService.buyDailyPass(token);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text(res['message'] ?? "Opération effectuée"), 
+                    content: Text(res['message'] ?? "Opération effectuée"),
                     backgroundColor: res['success'] == true ? Colors.green : Colors.red,
                   ),
                 );
@@ -272,12 +318,11 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
       );
     }
 
-    // Extraction dynamique sécurisée avec des valeurs par défaut si les clés changent
     final wallet = _dashboardData['wallet'] is Map ? _dashboardData['wallet'] : {};
     final balance = wallet['balance'] ?? _dashboardData['balance'] ?? "0 F";
-    final todayRides = _dashboardData['today_rides_count'] ?? _dashboardData['today_rides'] ?? _dashboardData['rides_count'] ?? 0;
+    final todayDeliveries = _dashboardData['today_rides_count'] ?? _dashboardData['today_rides'] ?? 0;
     final todayEarnings = _dashboardData['today_earnings'] ?? wallet['earnings'] ?? "0 F";
-    final driverName = _dashboardData['driver_name'] ?? _dashboardData['name'] ?? "Chauffeur";
+    final driverName = _dashboardData['driver_name'] ?? _dashboardData['name'] ?? "Livreur";
 
     return RefreshIndicator(
       onRefresh: _loadDashboard,
@@ -297,7 +342,7 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
                     const CircleAvatar(
                       radius: 22,
                       backgroundColor: Color(0xFFF7F7F9),
-                      child: Icon(Icons.person, color: Colors.black54),
+                      child: Icon(Icons.two_wheeler, color: Colors.black54),
                     ),
                     const SizedBox(width: 12),
                     Column(
@@ -319,7 +364,7 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              _isOnline ? "Chauffeur - En ligne" : "Chauffeur - Hors ligne",
+                              _isOnline ? "Livreur - En ligne" : "Livreur - Hors ligne",
                               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                             ),
                           ],
@@ -366,7 +411,7 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
                         children: [
                           const Text("Aujourd'hui", style: TextStyle(color: Colors.white70, fontSize: 12)),
                           const SizedBox(height: 4),
-                          Text("$todayRides courses", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          Text("$todayDeliveries livraisons", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         ],
                       ),
                       Column(
@@ -384,102 +429,158 @@ class _DriverHomeTabState extends State<DriverHomeTab> {
             ),
             const SizedBox(height: 24),
 
-            // Liste des courses à proximité dynamiques
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text("Courses à proximité", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                TextButton(
-                  onPressed: _isOnline ? _loadPendingRides : null,
-                  child: const Text("Actualiser", style: TextStyle(color: Color(0xFFFF5722))),
-                ),
-              ],
-            ),
+            const Text("Réception d'une commande", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
 
             if (!_isOnline)
               Container(
                 padding: const EdgeInsets.all(24),
                 alignment: Alignment.center,
-                child: Text("Passez en ligne pour voir les courses disponibles.", style: TextStyle(color: Colors.grey[500])),
+                child: Text("Passez en ligne pour recevoir des commandes.", style: TextStyle(color: Colors.grey[500])),
               )
-            else if (_isLoadingRides)
+            else if (_isLoadingDeliveries)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Center(child: CircularProgressIndicator(color: Color(0xFFFF5722))),
               )
-            else if (_pendingRides.isEmpty)
+            else if (_pendingDeliveries.isEmpty)
               Container(
                 padding: const EdgeInsets.all(24),
                 alignment: Alignment.center,
-                child: Text("Aucune course disponible pour le moment.", style: TextStyle(color: Colors.grey[500])),
+                child: Text("Aucune livraison disponible pour le moment.", style: TextStyle(color: Colors.grey[500])),
               )
             else
-              ListView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _pendingRides.length,
-                itemBuilder: (context, index) {
-                  final ride = _pendingRides[index];
-                  final pickup = ride['pickup_address'] ?? "Départ";
-                  final dropoff = ride['destination_address'];
-                  final driverDistance = ride['distance_km_from_driver'] ?? ride['distance_km'];
-                  final distance = driverDistance != null ? "$driverDistance km" : "";
-                  final price = ride['price'];
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7F7F9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.location_on, color: Color(0xFFFF5722)),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(pickup.toString(), style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  if (dropoff != null)
-                                    Text("→ $dropoff", style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                                  if (distance.isNotEmpty)
-                                    Text(distance, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                                ],
-                              ),
-                            ),
-                            Text(
-                              price != null ? "${price}F" : "",
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () => _acceptRide(ride['id']),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFFF5722),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            child: const Text("Accepter", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+              _buildOrderReceptionCard(_pendingDeliveries.first),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildOrderReceptionCard(dynamic ride) {
+    final pickup = ride['pickup_address'] ?? "Point de retrait";
+    final dropoff = ride['destination_address'] ?? "Point de livraison";
+    final driverDistance = ride['distance_km_from_driver'] ?? ride['distance_km'];
+    final distance = driverDistance != null ? "$driverDistance km" : "";
+    final price = ride['price'];
+    final packageType = ride['package_type'];
+    final packageWeight = ride['package_weight_kg'];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFF5722), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, spreadRadius: 2),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text("Nouvelle livraison", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF5722).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "$_secondsLeft s",
+                  style: const TextStyle(color: Color(0xFFFF5722), fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            price != null ? "${price}F" : "",
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 24, color: Colors.green),
+          ),
+          if (distance.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(distance, style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+            ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.trip_origin, color: Colors.green, size: 16),
+              const SizedBox(width: 8),
+              Expanded(child: Text(pickup.toString(), style: const TextStyle(fontSize: 13))),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 7.0),
+            child: SizedBox(height: 10, child: VerticalDivider(color: Colors.grey, thickness: 2)),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.location_on, color: Color(0xFFFF5722), size: 16),
+              const SizedBox(width: 8),
+              Expanded(child: Text(dropoff.toString(), style: const TextStyle(fontSize: 13))),
+            ],
+          ),
+          if (packageType != null || packageWeight != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF7F7F9),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.inventory_2_outlined, size: 16, color: Colors.black54),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      [
+                        if (packageType != null) packageType.toString(),
+                        if (packageWeight != null) "$packageWeight kg",
+                      ].join(" • "),
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _skipCurrentOffer,
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    side: const BorderSide(color: Colors.red),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text("Refuser", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => _acceptDelivery(ride['id']),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFFF5722),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text("Accepter", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

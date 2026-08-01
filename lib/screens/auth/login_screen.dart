@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:buudi_shared/buudi_shared.dart';
 import '../driver/driver_navigation_shell.dart';
+import '../delivery/delivery_navigation_shell.dart';
+import '../../services/driver_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -27,11 +30,13 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Redirection post-login pour l'app Partenaires.
   ///
-  /// Chauffeur et Livreur partagent la même coquille [DriverNavigationShell]
-  /// (conformément à la demande : "les deux dans la même application"),
-  /// tant que leur dossier (`driver_profile`, quel que soit `vehicle_type`)
-  /// est validé côté back-office.
-  void _handleNavigation(BuildContext context, Authenticated state) {
+  /// Une fois le dossier validé, on distingue Chauffeur (Voiture) et Livreur
+  /// (Moto/Vélo) : le `vehicle_type` n'est pas présent dans la réponse de
+  /// connexion (le endpoint /login ne charge pas la relation driverProfile),
+  /// donc on va le chercher via GET /v1/driver/profile - le token JWT est
+  /// déjà en mémoire (SharedPreferences) à ce stade, sauvegardé par AuthBloc
+  /// avant l'émission de l'état Authenticated.
+  Future<void> _handleNavigation(BuildContext context, Authenticated state) async {
     final user = state.user;
 
     print("🚀 Début de la redirection pour le rôle: ${user.role}");
@@ -39,16 +44,49 @@ class _LoginScreenState extends State<LoginScreen> {
     final status = user.driverProfile?.status ?? "pending";
     print("📋 Statut du dossier détecté: $status");
 
-    if (status == "approved") {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (context) => const DriverNavigationShell()),
-        (route) => false,
-      );
-    } else {
+    if (status != "approved") {
       Navigator.pushNamedAndRemoveUntil(
         context,
         '/partner_waiting',
+        (route) => false,
+      );
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token') ?? prefs.getString('token');
+
+    String? vehicleType;
+    if (token != null) {
+      final profileResult = await DriverService.getDriverProfile(token);
+      if (profileResult['success'] == true) {
+        vehicleType = profileResult['data']?['vehicle_type']?.toString();
+      }
+    }
+    print("🚗 vehicle_type détecté: $vehicleType");
+
+    if (!context.mounted) return;
+
+    if (vehicleType == 'Moto' || vehicleType == 'Vélo') {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const DeliveryNavigationShell()),
+        (route) => false,
+      );
+    } else {
+      // "Voiture", ou vehicle_type absent/inattendu : espace Chauffeur par
+      // défaut plutôt que de bloquer le partenaire avec un écran d'erreur.
+      if (vehicleType != 'Voiture') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Type de véhicule non reconnu, ouverture de l'espace Chauffeur par défaut."),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const DriverNavigationShell()),
         (route) => false,
       );
     }
@@ -57,7 +95,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<AuthBloc, AuthState>(
-      listener: (context, state) {
+      listener: (context, state) async {
         if (state is AuthError) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -75,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
           );
 
           try {
-            _handleNavigation(context, state);
+            await _handleNavigation(context, state);
           } catch (e) {
             print("❌ Erreur de route : $e");
             ScaffoldMessenger.of(context).showSnackBar(

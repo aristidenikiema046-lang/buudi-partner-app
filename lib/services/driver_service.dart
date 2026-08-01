@@ -82,6 +82,46 @@ class DriverService {
     }
   }
 
+  /// Récupérer les courses en attente à proximité d'une position
+  static Future<Map<String, dynamic>> getPendingRides(
+    String jwtToken, {
+    required double latitude,
+    required double longitude,
+    double radiusKm = 5,
+  }) async {
+    try {
+      final uri = Uri.parse('$baseUrl/driver/rides/pending').replace(
+        queryParameters: {
+          'lat': latitude.toString(),
+          'lng': longitude.toString(),
+          'radius_km': radiusKm.toString(),
+        },
+      );
+
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200 && data['success'] == true) {
+        return {'success': true, 'data': data['data']};
+      } else {
+        return {
+          'success': false,
+          'message': data['message'] ?? 'Erreur lors du chargement des courses disponibles.'
+        };
+      }
+    } catch (e) {
+      return {'success': false, 'message': 'Impossible de contacter le serveur.'};
+    }
+  }
+
   static Future<Map<String, dynamic>> toggleOnlineStatus(String jwtToken) async {
     try {
       final response = await http.post(
@@ -148,7 +188,7 @@ class DriverService {
     }
   }
 
-  static Future<Map<String, dynamic>> acceptRide(String jwtToken, int rideId) async {
+  static Future<Map<String, dynamic>> acceptRide(String jwtToken, String rideId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/rides/$rideId/accept'),
@@ -165,7 +205,7 @@ class DriverService {
         return {
           'success': true,
           'message': data['message'] ?? 'Course acceptée !',
-          'ride': data['data']['ride'],
+          'ride': data['ride'],
         };
       } else {
         return {
@@ -179,7 +219,7 @@ class DriverService {
   }
 
   /// 1. Signaler l'arrivée au point de prise en charge
-  static Future<Map<String, dynamic>> arriveAtPickup(String jwtToken, int rideId) async {
+  static Future<Map<String, dynamic>> arriveAtPickup(String jwtToken, String rideId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/rides/$rideId/arrive'),
@@ -197,7 +237,7 @@ class DriverService {
   }
 
   /// 2. Démarrer la course
-  static Future<Map<String, dynamic>> startRide(String jwtToken, int rideId) async {
+  static Future<Map<String, dynamic>> startRide(String jwtToken, String rideId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/rides/$rideId/start'),
@@ -215,10 +255,29 @@ class DriverService {
   }
 
   /// 3. Terminer la course
-  static Future<Map<String, dynamic>> completeRide(String jwtToken, int rideId) async {
+  static Future<Map<String, dynamic>> completeRide(String jwtToken, String rideId) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/driver/rides/$rideId/complete'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $jwtToken',
+        },
+      );
+      final data = jsonDecode(response.body);
+      return {'success': response.statusCode == 200, 'message': data['message']};
+    } catch (e) {
+      return {'success': false, 'message': 'Erreur de connexion.'};
+    }
+  }
+
+  /// 4. Annuler la course (repasse "pending" pour un autre chauffeur, sauf
+  /// si elle était déjà "in_progress" : dans ce cas elle passe "cancelled").
+  static Future<Map<String, dynamic>> cancelRide(String jwtToken, String rideId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/driver/rides/$rideId/cancel'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../services/driver_service.dart';
 
 class DriverRidesTab extends StatefulWidget {
@@ -37,7 +38,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
     setState(() => _isLoading = false);
   }
 
-  Future<void> _handleRideAction(String actionType, int rideId) async {
+  Future<void> _handleRideAction(String actionType, String rideId) async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token') ?? prefs.getString('token');
 
@@ -53,6 +54,8 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
       result = await DriverService.startRide(token, rideId);
     } else if (actionType == 'complete') {
       result = await DriverService.completeRide(token, rideId);
+    } else if (actionType == 'cancel') {
+      result = await DriverService.cancelRide(token, rideId);
     }
 
     if (result['success'] == true) {
@@ -65,6 +68,84 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
         SnackBar(content: Text(result['message'] ?? 'Une erreur est survenue.'), backgroundColor: Colors.red),
       );
       setState(() => _isLoading = false);
+    }
+  }
+
+  /// Ouvre l'app Google Maps externe pour guider le chauffeur : vers le point
+  /// de prise en charge tant que la course n'est pas démarrée, sinon vers la destination.
+  Future<void> _openNavigation() async {
+    if (_activeRide == null) return;
+
+    final bool goingToPickup = _activeRide!['status'] != 'in_progress';
+    final double? lat = double.tryParse(
+      (goingToPickup ? _activeRide!['pickup_latitude'] : _activeRide!['destination_latitude'])?.toString() ?? '',
+    );
+    final double? lng = double.tryParse(
+      (goingToPickup ? _activeRide!['pickup_longitude'] : _activeRide!['destination_longitude'])?.toString() ?? '',
+    );
+
+    if (lat == null || lng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Coordonnées indisponibles pour la navigation."), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final googleNavUri = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
+    final fallbackUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng');
+
+    if (await canLaunchUrl(googleNavUri)) {
+      await launchUrl(googleNavUri);
+    } else {
+      await launchUrl(fallbackUri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  /// Appelle le client via l'app téléphone native.
+  Future<void> _callClient() async {
+    final String? phone = _activeRide?['passenger']?['phone']?.toString();
+
+    if (phone == null || phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Numéro du client indisponible."), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    final telUri = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(telUri)) {
+      await launchUrl(telUri);
+    }
+  }
+
+  /// Demande confirmation puis annule la course active via
+  /// POST /v1/driver/rides/{id}/cancel (repasse "pending" pour un autre
+  /// chauffeur, sauf si la course était déjà "in_progress").
+  Future<void> _cancelRide() async {
+    if (_activeRide == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Annuler la course ?"),
+        content: const Text(
+          "Le client sera informé et la course sera remise à disposition d'un autre chauffeur si elle n'est pas encore commencée.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text("Retour"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text("Annuler la course", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _handleRideAction('cancel', _activeRide!['id']);
     }
   }
 
@@ -150,7 +231,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                           CircleAvatar(
                                             backgroundColor: primaryColor,
                                             child: Text(
-                                              (_activeRide!['client']?['name'] ?? 'C')[0].toUpperCase(),
+                                              (_activeRide!['passenger']?['name'] ?? 'C')[0].toUpperCase(),
                                               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                             ),
                                           ),
@@ -160,7 +241,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 Text(
-                                                  _activeRide!['client']?['name'] ?? 'Koffi Jean',
+                                                  _activeRide!['passenger']?['name'] ?? 'Koffi Jean',
                                                   style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
                                                 ),
                                                 const SizedBox(height: 4),
@@ -191,9 +272,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                             ),
                                             child: IconButton(
                                               icon: const Icon(Icons.phone, color: Colors.white, size: 20),
-                                              onPressed: () {
-                                                // Action d'appel client
-                                              },
+                                              onPressed: _callClient,
                                             ),
                                           ),
                                         ],
@@ -231,7 +310,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                                 ),
                                               ),
                                               OutlinedButton(
-                                                onPressed: () {},
+                                                onPressed: _openNavigation,
                                                 style: OutlinedButton.styleFrom(
                                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
                                                   minimumSize: const Size(60, 30),
@@ -258,12 +337,12 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     const Text("Destination", style: TextStyle(color: Colors.grey, fontSize: 10)),
-                                                    Text(_activeRide!['dropoff_address'] ?? 'Plateau, Immeuble SCIAM', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                                    Text(_activeRide!['destination_address'] ?? 'Plateau, Immeuble SCIAM', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                                   ],
                                                 ),
                                               ),
                                               Text(
-                                                _activeRide!['distance'] ?? '7,2 km',
+                                                _activeRide!['distance_km'] != null ? "${_activeRide!['distance_km']} km" : '7,2 km',
                                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey),
                                               ),
                                             ],
@@ -377,9 +456,7 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                     SizedBox(
                                       width: double.infinity,
                                       child: OutlinedButton(
-                                        onPressed: () {
-                                          // Logique d'annulation de course si nécessaire
-                                        },
+                                        onPressed: _cancelRide,
                                         style: OutlinedButton.styleFrom(
                                           padding: const EdgeInsets.symmetric(vertical: 12),
                                           side: const BorderSide(color: Colors.red),

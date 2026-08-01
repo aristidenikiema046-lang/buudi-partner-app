@@ -10,6 +10,7 @@ import 'package:buudi_shared/buudi_shared.dart';
 import 'screens/auth/partner_role_selection_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/driver/driver_navigation_shell.dart';
+import 'services/background_service.dart';
 
 /// Contournement SSL pour le développement local (certificats auto-signés & HTTP)
 class MyHttpOverrides extends HttpOverrides {
@@ -57,6 +58,10 @@ void main() async {
   await Firebase.initializeApp();
 
   await FcmService.init(navigatorKey, onNotificationClick: _handlePartnerNotificationClick);
+
+  // Configure le service d'arrière-plan AVANT que _toggleOnlineStatus() ne puisse
+  // appeler startTracking() - sans ça, flutter_background_service échoue silencieusement.
+  await BackgroundServiceManager().initializeService();
 
   runApp(const BuudiPartnerApp());
 }

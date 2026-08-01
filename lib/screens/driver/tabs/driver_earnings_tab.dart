@@ -3,7 +3,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/driver_service.dart';
 
 class DriverEarningsTab extends StatefulWidget {
-  const DriverEarningsTab({Key? key}) : super(key: key);
+  /// Libellé de l'activité affiché dans les libellés ("courses" pour un
+  /// chauffeur, "livraisons" pour un livreur). Le endpoint /driver/dashboard
+  /// ne distingue pas les deux : seul le libellé affiché change.
+  final String activityLabel;
+
+  const DriverEarningsTab({Key? key, this.activityLabel = 'courses'}) : super(key: key);
 
   @override
   State<DriverEarningsTab> createState() => _DriverEarningsTabState();
@@ -81,8 +86,12 @@ class _DriverEarningsTabState extends State<DriverEarningsTab> {
                   const SizedBox(height: 24),
                   const Text("Détails récents", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
-                  _buildEarningCard("Aujourd'hui", "$todayRides courses", todayEarnings.toString()),
-                  _buildEarningCard("Courses effectuées", "Validées", todayEarnings.toString()),
+                  _buildEarningCard("Aujourd'hui", "$todayRides ${widget.activityLabel}", todayEarnings.toString()),
+                  _buildEarningCard(
+                    "${widget.activityLabel[0].toUpperCase()}${widget.activityLabel.substring(1)} effectuées",
+                    "Validées",
+                    todayEarnings.toString(),
+                  ),
                 ],
               ),
             ),
