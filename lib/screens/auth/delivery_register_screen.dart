@@ -7,14 +7,12 @@ import 'package:buudi_shared/buudi_shared.dart';
 
 /// Inscription Livreur.
 ///
-/// NOTE MIGRATION : dans le prototype d'origine, cet écran était une
-/// coquille purement visuelle (aucun appel réseau, boutons d'upload
-/// inactifs, pas de mot de passe). Le back-office actuel n'a pas de table
-/// séparée pour les livreurs : `driver_profiles` couvre déjà tous les
-/// `vehicle_type` (voiture, moto, vélo). On réutilise donc le même
-/// endpoint `POST /v1/driver/register` que pour les chauffeurs, ce qui
-/// correspond à la demande "chauffeurs et livreurs dans la même
-/// application" et évite de dupliquer un modèle côté Laravel.
+/// NOTE MIGRATION : le back-office n'a pas de table séparée pour les
+/// livreurs : `driver_profiles` couvre déjà tous les `vehicle_type`
+/// (voiture, moto, vélo). On réutilise donc le même endpoint
+/// `POST /v1/driver/register` que pour les chauffeurs (mêmes clés de champs
+/// et de fichiers), ce qui correspond à la demande "chauffeurs et livreurs
+/// dans la même application" et évite de dupliquer un modèle côté Laravel.
 class DeliveryRegisterScreen extends StatefulWidget {
   const DeliveryRegisterScreen({Key? key}) : super(key: key);
 
@@ -30,8 +28,9 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
   final List<String> _steps = ["Informations", "Véhicule", "Documents", "Confirmation"];
 
   final _formKeyStep1 = GlobalKey<FormState>();
+  final _formKeyStep2 = GlobalKey<FormState>();
 
-  // --- Étape 1 : Informations ---
+  // --- Étape 1 : Informations personnelles ---
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
@@ -39,9 +38,13 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
   final TextEditingController _passwordController = TextEditingController();
   final TextEditingController _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
+
+  File? _profileImage;
 
   // --- Étape 2 : Véhicule ---
   String _selectedVehicle = "Moto";
+  final TextEditingController _vehicleBrand = TextEditingController();
   final TextEditingController _vehicleModel = TextEditingController();
   final TextEditingController _vehicleYear = TextEditingController();
   final TextEditingController _vehicleColor = TextEditingController();
@@ -51,6 +54,7 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
   final ImagePicker _picker = ImagePicker();
   File? _identityFile;
   File? _licenseFile;
+  File? _selfieFile;
   File? _registrationFile; // Carte grise / immatriculation
   File? _insuranceFile; // Optionnel
 
@@ -63,6 +67,7 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
     _cityController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _vehicleBrand.dispose();
     _vehicleModel.dispose();
     _vehicleYear.dispose();
     _vehicleColor.dispose();
@@ -139,6 +144,10 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
 
   void _handleNextStep() {
     if (_currentStep == 0) {
+      if (_profileImage == null) {
+        _showSnackBar("Veuillez ajouter votre photo de profil.");
+        return;
+      }
       if (_passwordController.text.trim() != _confirmPasswordController.text.trim()) {
         _showSnackBar("Les mots de passe ne correspondent pas.");
         return;
@@ -147,7 +156,9 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
         _nextStep();
       }
     } else if (_currentStep == 1) {
-      _nextStep();
+      if (_formKeyStep2.currentState!.validate()) {
+        _nextStep();
+      }
     } else if (_currentStep == 2) {
       if (_identityFile == null) {
         _showSnackBar("La pièce d'identité est obligatoire.");
@@ -155,6 +166,10 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
       }
       if (_licenseFile == null) {
         _showSnackBar("Le permis de conduire est obligatoire.");
+        return;
+      }
+      if (_selfieFile == null) {
+        _showSnackBar("Le selfie de contrôle est obligatoire.");
         return;
       }
       if (_registrationFile == null) {
@@ -182,16 +197,26 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
       request.fields['password_confirmation'] = _confirmPasswordController.text.trim();
       request.fields['city'] = _cityController.text.trim();
       request.fields['vehicle_type'] = _selectedVehicle;
+      request.fields['vehicle_brand'] = _vehicleBrand.text.trim();
       request.fields['vehicle_model'] = _vehicleModel.text.trim();
       request.fields['vehicle_year'] = _vehicleYear.text.trim();
       request.fields['vehicle_color'] = _vehicleColor.text.trim();
       request.fields['vehicle_plate'] = _vehiclePlate.text.trim();
+      // Le backend (partagé avec l'inscription chauffeur) exige vehicle_seats
+      // même si ça n'a pas de sens pour une Moto/Vélo et n'apparaît pas sur
+      // la maquette Livreur : on envoie une valeur par défaut plutôt que
+      // d'afficher un champ qui n'a pas lieu d'être pour ce parcours.
+      request.fields['vehicle_seats'] = '1';
       request.fields['fcm_token'] = fcmToken ?? '';
 
-      // Le backend attend `cni` / `license` — on réutilise les mêmes clés
-      // pour rester compatible avec le contrôleur chauffeur existant.
+      // Le backend attend `cni` / `license` / `vehicle_image` — on réutilise
+      // les mêmes clés pour rester compatible avec le contrôleur chauffeur
+      // existant. `vehicle_image` (requis, doit être une image) reçoit ici
+      // la photo de la carte grise faute de champ dédié côté back-office.
+      request.files.add(await http.MultipartFile.fromPath('profile_image', _profileImage!.path));
       request.files.add(await http.MultipartFile.fromPath('cni', _identityFile!.path));
       request.files.add(await http.MultipartFile.fromPath('license', _licenseFile!.path));
+      request.files.add(await http.MultipartFile.fromPath('selfie', _selfieFile!.path));
       request.files.add(await http.MultipartFile.fromPath('vehicle_image', _registrationFile!.path));
       if (_insuranceFile != null) {
         request.files.add(await http.MultipartFile.fromPath('criminal_record', _insuranceFile!.path));
@@ -310,13 +335,36 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Center(
-              child: CircleAvatar(
-                radius: 50,
-                backgroundColor: const Color(0xFFFFF6F1),
-                child: const Icon(Icons.delivery_dining_rounded, size: 50, color: Color(0xFFFF5722)),
+              child: Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 45,
+                    backgroundColor: Colors.grey[100],
+                    backgroundImage: _profileImage != null ? FileImage(_profileImage!) : null,
+                    child: _profileImage == null
+                        ? const Icon(Icons.delivery_dining_rounded, size: 45, color: Colors.grey)
+                        : null,
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: GestureDetector(
+                      onTap: () => _showImageSourceDialog((file) {
+                        setState(() => _profileImage = file);
+                      }),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: const BoxDecoration(color: Color(0xFFFF5722), shape: BoxShape.circle),
+                        child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
+            const Center(child: Text("Ajoutez une photo *", style: TextStyle(fontSize: 12, color: Colors.grey))),
+            const SizedBox(height: 20),
             const Text("Informations personnelles", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             _buildTextField("Nom complet", "Kouassi Ibrahim", Icons.person_outline_rounded, _nameController,
@@ -347,7 +395,9 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
               "••••••••",
               Icons.lock_outline_rounded,
               _confirmPasswordController,
-              obscureText: _obscurePassword,
+              obscureText: _obscureConfirmPassword,
+              isPassword: true,
+              onToggleVisibility: () => setState(() => _obscureConfirmPassword = !_obscureConfirmPassword),
               validator: (v) => v!.isEmpty ? "Requis" : null,
             ),
             const SizedBox(height: 40),
@@ -362,36 +412,46 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
   Widget _buildStep2Vehicule() {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Informations du véhicule", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          const Text("Ajoutez les informations de votre moyen de livraison.", style: TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 20),
-          const Text("Type de moyen", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildVehicleSelector("Moto", Icons.two_wheeler_rounded),
-              const SizedBox(width: 12),
-              _buildVehicleSelector("Vélo", Icons.pedal_bike_rounded),
-              const SizedBox(width: 12),
-              _buildVehicleSelector("Voiture", Icons.directions_car_rounded),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _buildTextField("Marque / Modèle", "Yamaha XMAX 300", Icons.branding_watermark_outlined, _vehicleModel),
-          const SizedBox(height: 12),
-          _buildTextField("Année", "2022", Icons.calendar_today_rounded, _vehicleYear, keyboardType: TextInputType.number),
-          const SizedBox(height: 12),
-          _buildTextField("Couleur", "Noir", Icons.color_lens_outlined, _vehicleColor),
-          const SizedBox(height: 12),
-          _buildTextField("Numéro d'immatriculation", "1234AB01", Icons.subtitles_rounded, _vehiclePlate),
-          const SizedBox(height: 30),
-          _buildButton("Continuer", _handleNextStep),
-          const SizedBox(height: 20),
-        ],
+      child: Form(
+        key: _formKeyStep2,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Informations du véhicule", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text("Ajoutez les informations de votre moyen de livraison.", style: TextStyle(color: Colors.grey, fontSize: 12)),
+            const SizedBox(height: 20),
+            const Text("Type de moyen", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _buildVehicleSelector("Moto", Icons.two_wheeler_rounded),
+                const SizedBox(width: 12),
+                _buildVehicleSelector("Vélo", Icons.pedal_bike_rounded),
+                const SizedBox(width: 12),
+                _buildVehicleSelector("Voiture", Icons.directions_car_rounded),
+              ],
+            ),
+            const SizedBox(height: 24),
+            _buildTextField("Marque", "Yamaha", Icons.branding_watermark_outlined, _vehicleBrand,
+                validator: (v) => v!.isEmpty ? "Requis" : null),
+            const SizedBox(height: 12),
+            _buildTextField("Modèle", "XMAX 300", Icons.model_training_rounded, _vehicleModel,
+                validator: (v) => v!.isEmpty ? "Requis" : null),
+            const SizedBox(height: 12),
+            _buildTextField("Année", "2022", Icons.calendar_today_rounded, _vehicleYear,
+                keyboardType: TextInputType.number, validator: (v) => v!.isEmpty ? "Requis" : null),
+            const SizedBox(height: 12),
+            _buildTextField("Couleur", "Noir", Icons.color_lens_outlined, _vehicleColor,
+                validator: (v) => v!.isEmpty ? "Requis" : null),
+            const SizedBox(height: 12),
+            _buildTextField("Numéro d'immatriculation", "1234AB01", Icons.subtitles_rounded, _vehiclePlate,
+                validator: (v) => v!.isEmpty ? "Requis" : null),
+            const SizedBox(height: 30),
+            _buildButton("Continuer", _handleNextStep),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
@@ -410,9 +470,11 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
           const SizedBox(height: 12),
           _buildDocUploadCard("Permis de conduire", "Recto/verso", _licenseFile, (f) => _licenseFile = f),
           const SizedBox(height: 12),
+          _buildDocUploadCard("Selfie (visage dégagé)", "Prenez un selfie clair", _selfieFile, (f) => _selfieFile = f),
+          const SizedBox(height: 12),
           _buildDocUploadCard("Carte grise / Immatriculation", "Document du véhicule", _registrationFile, (f) => _registrationFile = f),
           const SizedBox(height: 12),
-          _buildDocUploadCard("Assurance du véhicule (optionnel)", "Si disponible", _insuranceFile, (f) => _insuranceFile = f),
+          _buildDocUploadCard("Assurance du véhicule (optionnel)", "En cours de validité", _insuranceFile, (f) => _insuranceFile = f),
           const SizedBox(height: 30),
           _buildButton("Soumettre mon dossier", _handleNextStep, loading: _isLoading),
           const SizedBox(height: 20),
@@ -440,9 +502,43 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, fontSize: 13, height: 1.4),
           ),
+          const SizedBox(height: 24),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFFF7F7F9), borderRadius: BorderRadius.circular(12)),
+            child: Column(
+              children: [
+                _buildRecapRow("Nom complet", _nameController.text),
+                const Divider(),
+                _buildRecapRow("Téléphone", _phoneController.text),
+                const Divider(),
+                _buildRecapRow("Email", _emailController.text),
+                const Divider(),
+                _buildRecapRow("Moyen de livraison", _selectedVehicle),
+                const Divider(),
+                _buildRecapRow("Statut du dossier", "En attente de validation"),
+              ],
+            ),
+          ),
           const Spacer(),
-          _buildButton("Fermer", () => Navigator.popUntil(context, (route) => route.isFirst)),
+          _buildButton("Suivre ma demande", () {
+            Navigator.of(context).pushNamedAndRemoveUntil('/partner_waiting', (route) => false);
+          }),
           const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRecapRow(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title, style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+          Text(value.isEmpty ? "-" : value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
         ],
       ),
     );
