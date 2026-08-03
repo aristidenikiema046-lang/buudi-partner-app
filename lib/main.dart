@@ -7,6 +7,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:buudi_shared/buudi_shared.dart';
 
+import 'screens/splash_screen.dart';
 import 'screens/auth/partner_role_selection_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/driver/driver_navigation_shell.dart';
@@ -83,8 +84,8 @@ class BuudiPartnerApp extends StatelessWidget {
           fontFamily: 'Roboto',
         ),
 
-        // Écran initial : choix Chauffeur Pro / Livreur (plus de "Client" ici)
-        home: const PartnerRoleSelectionScreen(),
+        // Écran initial : animation logo, puis choix Chauffeur Pro / Livreur
+        home: const SplashScreen(),
 
         routes: {
           '/role_selection': (context) => const PartnerRoleSelectionScreen(),

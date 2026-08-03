@@ -18,7 +18,15 @@ class PartnerRoleSelectionScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 40),
+            const SizedBox(height: 16),
+            Center(
+              child: Image.asset(
+                'assets/branding/logo_with_tagline_partner_merchant.png',
+                width: MediaQuery.of(context).size.width * 0.72,
+                fit: BoxFit.contain,
+              ),
+            ),
+            const SizedBox(height: 8),
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),

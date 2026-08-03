@@ -8,7 +8,7 @@
     <application
         android:label="buudi_partner_app"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/launcher_icon"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
@@ -40,6 +40,15 @@
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDUbhPTBFXtqCmo8IjxbdGCsnxycGNlkaw" />
+
+        <!-- Surcharge du plugin flutter_background_service : Android 14+
+             (targetSdk 36) exige un foregroundServiceType déclaré, sinon le
+             service crashe (et tue tout le process) dès qu'il démarre. -->
+        <service
+            android:name="id.flutter.flutter_background_service.BackgroundService"
+            android:foregroundServiceType="location"
+            android:exported="true"
+            android:stopWithTask="false" />
     </application>
 
     <!-- Android 11+ : visibilité des intents requise par url_launcher (appel + navigation externe) -->
