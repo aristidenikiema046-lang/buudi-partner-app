@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../services/driver_service.dart';
+import '../../common/chat_screen.dart';
 
 class DriverRidesTab extends StatefulWidget {
   const DriverRidesTab({Key? key}) : super(key: key);
@@ -273,6 +274,25 @@ class _DriverRidesTabState extends State<DriverRidesTab> {
                                             child: IconButton(
                                               icon: const Icon(Icons.phone, color: Colors.white, size: 20),
                                               onPressed: _callClient,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          // Bouton messagerie
+                                          Container(
+                                            decoration: BoxDecoration(
+                                              color: primaryColor,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: IconButton(
+                                              icon: const Icon(Icons.chat_outlined, color: Colors.white, size: 20),
+                                              onPressed: () {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => ChatScreen(rideId: _activeRide!['id'].toString()),
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ),
                                         ],

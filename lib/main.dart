@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -12,16 +10,6 @@ import 'screens/auth/partner_role_selection_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/driver/driver_navigation_shell.dart';
 import 'services/background_service.dart';
-
-/// Contournement SSL pour le développement local (certificats auto-signés & HTTP)
-class MyHttpOverrides extends HttpOverrides {
-  @override
-  HttpClient createHttpClient(SecurityContext? context) {
-    return super.createHttpClient(context)
-      ..badCertificateCallback =
-          (X509Certificate cert, String host, int port) => true;
-  }
-}
 
 /// Clé globale pour la navigation via notifications FCM
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -45,8 +33,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await dotenv.load(fileName: ".env");
-
-  HttpOverrides.global = MyHttpOverrides();
 
   FlutterError.onError = (FlutterErrorDetails details) {
     FlutterError.presentError(details);
