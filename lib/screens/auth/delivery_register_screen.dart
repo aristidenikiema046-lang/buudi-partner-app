@@ -209,17 +209,27 @@ class _DeliveryRegisterScreenState extends State<DeliveryRegisterScreen> {
       request.fields['vehicle_seats'] = '1';
       request.fields['fcm_token'] = fcmToken ?? '';
 
-      // Le backend attend `cni` / `license` / `vehicle_image` — on réutilise
-      // les mêmes clés pour rester compatible avec le contrôleur chauffeur
-      // existant. `vehicle_image` (requis, doit être une image) reçoit ici
-      // la photo de la carte grise faute de champ dédié côté back-office.
+      // Le backend attend `cni` / `license` — clés partagées avec le
+      // contrôleur chauffeur existant. La carte grise et l'assurance ont
+      // désormais leurs propres champs dédiés côté backend
+      // (vehicle_registration / insurance) : elles ne sont plus glissées
+      // dans vehicle_image / criminal_record comme avant.
+      //
+      // vehicle_image reste envoyé avec la photo de la carte grise en plus
+      // de vehicle_registration : ce parcours livreur ne capture pas de
+      // photo du véhicule à part entière, et vehicle_image reste un champ
+      // obligatoire côté backend (partagé avec le parcours chauffeur, qui
+      // lui capture une vraie photo du véhicule). Pas idéal, mais honnête —
+      // contrairement à l'ancien contournement, aucun document n'est plus
+      // stocké sous une étiquette qui ne correspond pas à son contenu.
       request.files.add(await http.MultipartFile.fromPath('profile_image', _profileImage!.path));
       request.files.add(await http.MultipartFile.fromPath('cni', _identityFile!.path));
       request.files.add(await http.MultipartFile.fromPath('license', _licenseFile!.path));
       request.files.add(await http.MultipartFile.fromPath('selfie', _selfieFile!.path));
       request.files.add(await http.MultipartFile.fromPath('vehicle_image', _registrationFile!.path));
+      request.files.add(await http.MultipartFile.fromPath('vehicle_registration', _registrationFile!.path));
       if (_insuranceFile != null) {
-        request.files.add(await http.MultipartFile.fromPath('criminal_record', _insuranceFile!.path));
+        request.files.add(await http.MultipartFile.fromPath('insurance', _insuranceFile!.path));
       }
 
       var response = await request.send();
