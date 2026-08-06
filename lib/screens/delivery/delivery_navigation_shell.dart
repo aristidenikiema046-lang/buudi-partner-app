@@ -45,7 +45,7 @@ class _DeliveryNavigationShellState extends State<DeliveryNavigationShell> {
           BottomNavigationBarItem(
             icon: Icon(Icons.local_shipping_outlined),
             activeIcon: Icon(Icons.local_shipping),
-            label: 'Livraisons',
+            label: 'Courses',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.account_balance_wallet_outlined),

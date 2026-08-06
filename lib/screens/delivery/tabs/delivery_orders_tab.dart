@@ -208,7 +208,7 @@ class _DeliveryOrdersTabState extends State<DeliveryOrdersTab> {
         backgroundColor: Colors.white,
         elevation: 0,
         title: const Text(
-          "Livraison en cours",
+          "Mes Courses",
           style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
         ),
       ),
